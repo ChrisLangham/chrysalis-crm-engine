@@ -1,6 +1,4 @@
-// Chrysalis CRM Engine — v0.2.1
-// Changes: injects its own base CSS (no Tailwind required),
-// adds voice/command bar, field labels, dialog fallback, toasts.
+// Chrysalis CRM Engine — v0.2.1 (styles + voice + labels)
 // Use from your private site via:
 // <script src="https://cdn.jsdelivr.net/gh/ChrisLangham/chrysalis-crm-engine@prod/app.js"></script>
 
@@ -100,12 +98,10 @@ function init() {
 }
 
 function injectBaseStyles(){
-  // font
   const link = document.createElement('link');
   link.rel = 'stylesheet';
   link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap';
   document.head.appendChild(link);
-  // base CSS (no Tailwind needed)
   const css = `:root{--ring:#e5e7eb}*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f7f7fb;color:#111}
   .card{background:#fff;border-radius:16px;box-shadow:0 10px 25px -10px rgba(0,0,0,.15);padding:20px}
   .btn{display:inline-flex;align-items:center;justify-content:center;border-radius:12px;padding:8px 14px;font-weight:600;cursor:pointer;border:0}
