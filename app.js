@@ -1,6 +1,8 @@
-// Chrysalis CRM Engine — v0.1
-// This is extracted from the single-file HTML app. Include it via:
-// <script src="https://cdn.jsdelivr.net/gh/YourUser/chrysalis-crm-engine@main/app.js"></script>
+// Chrysalis CRM Engine — v0.2.1
+// Changes: injects its own base CSS (no Tailwind required),
+// adds voice/command bar, field labels, dialog fallback, toasts.
+// Use from your private site via:
+// <script src="https://cdn.jsdelivr.net/gh/ChrisLangham/chrysalis-crm-engine@prod/app.js"></script>
 
 // --- Tiny helpers ---
 const $ = (sel, el=document) => el.querySelector(sel);
@@ -18,14 +20,13 @@ const DEMO = params.has('demo') || params.get('mode') === 'demo';
 const STORAGE_SUFFIX = DEMO ? '_demo' : '_prod';
 
 const store = {
-  key: 'chrysalis_crm_lite_v01' + STORAGE_SUFFIX,
+  key: 'chrysalis_crm_lite_v021' + STORAGE_SUFFIX,
   data: { people: [], tasks: [], socials: [], campaigns: [], tv: {} },
   load() {
     const raw = localStorage.getItem(this.key);
     if (raw) {
       try { this.data = JSON.parse(raw); } catch {}
     } else {
-      // In demo mode, always start from seeded data on first load
       this.resetDemo();
     }
   },
@@ -45,7 +46,6 @@ function demoData() {
     {id: ids(), code:'C100004', first_name:'Chris', last_name:'Taylor', status:'Member', is_coach:false, upline_id:null, coach_id:null, location:'Online', member_type:'Online'},
     {id: ids(), code:'C100005', first_name:'Hannah', last_name:'Green', status:'Potential', is_coach:false, upline_id:null, coach_id:null, location:'Online', member_type:'Unknown'},
   ];
-  // simple coaching links
   const shannon = people.find(p=>p.first_name==='Shannon');
   const chris = people.find(p=>p.first_name==='Chris');
   const hannah = people.find(p=>p.first_name==='Hannah');
@@ -76,11 +76,13 @@ function demoData() {
 let tvChart, statusChart;
 
 function init() {
+  injectBaseStyles();
   store.load();
   bindTabs();
   bindHeader();
   renderAll();
-  // allow saving the file itself (only works if index.html wrapped this engine; noop otherwise)
+  addCommandUI();
+  polyfillDialog();
   const saveBtn = $('#saveBtn');
   if (saveBtn) {
     const src = document.documentElement.outerHTML;
@@ -88,7 +90,6 @@ function init() {
     saveBtn.href = URL.createObjectURL(blob);
     saveBtn.download = 'chrysalis-crm-lite.html';
   }
-  // Mode badge
   const badgeHost = $('#modeBadge');
   if (DEMO && badgeHost) {
     const b = document.createElement('span');
@@ -96,6 +97,28 @@ function init() {
     b.textContent = 'DEMO';
     badgeHost.replaceWith(b);
   }
+}
+
+function injectBaseStyles(){
+  // font
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap';
+  document.head.appendChild(link);
+  // base CSS (no Tailwind needed)
+  const css = `:root{--ring:#e5e7eb}*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f7f7fb;color:#111}
+  .card{background:#fff;border-radius:16px;box-shadow:0 10px 25px -10px rgba(0,0,0,.15);padding:20px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;border-radius:12px;padding:8px 14px;font-weight:600;cursor:pointer;border:0}
+  .btn-primary{background:#111;color:#fff}.btn-primary:hover{background:#222}
+  .btn-secondary{background:#f3f4f6}.btn-secondary:hover{background:#e5e7eb}
+  .input,.select{width:100%;border:1px solid #d1d5db;border-radius:12px;padding:8px 12px;background:#fff}
+  .badge{display:inline-flex;align-items:center;border-radius:9999px;padding:2px 10px;font-size:12px;font-weight:600}
+  table{width:100%;border-collapse:separate;border-spacing:0 8px}
+  th{font-weight:600;color:#6b7280}
+  td,th{padding:8px 16px}
+  dialog::backdrop{background:rgba(0,0,0,0.25)}
+  `;
+  const style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
 }
 
 function bindHeader(){
@@ -113,9 +136,9 @@ function bindHeader(){
   if (importInput) importInput.addEventListener('change', async (e)=>{
     const file = e.target.files?.[0]; if(!file) return;
     const text = await file.text();
-    try{ store.data = JSON.parse(text); store.save(); renderAll(); }catch{ alert('Invalid JSON'); }
+    try{ store.data = JSON.parse(text); store.save(); renderAll(); toast('Imported JSON'); }catch{ alert('Invalid JSON'); }
   });
-  if (resetDemoBtn) resetDemoBtn.addEventListener('click', ()=>{ if(confirm('Reset to demo data?')){ store.resetDemo(); renderAll(); }});
+  if (resetDemoBtn) resetDemoBtn.addEventListener('click', ()=>{ if(confirm('Reset to demo data?')){ store.resetDemo(); renderAll(); toast('Demo data reset'); }});
 }
 
 function bindTabs(){
@@ -129,7 +152,6 @@ function bindTabs(){
       if(tab==='dashboard') renderDashboard();
     });
   });
-  // default to dashboard on load
   const first = $('[data-tab="dashboard"]');
   if (first) first.click();
 }
@@ -144,7 +166,6 @@ function renderAll(){
 
 // --- Dashboard ---
 function renderDashboard(){
-  // Coach filter
   const coachSelect = $('#tvCoachFilter');
   if (coachSelect) {
     const coaches = store.data.people.filter(p=>p.is_coach);
@@ -153,7 +174,6 @@ function renderDashboard(){
   }
   drawTVChart();
   drawStatusChart();
-  // quick add
   const qa = $('#quickAddForm');
   if (qa) {
     qa.onsubmit = (e)=>{
@@ -171,6 +191,7 @@ function renderDashboard(){
       store.data.people.push(p); store.save();
       e.target.reset();
       renderAll();
+      toast(`Added ${personName(p)}`);
     };
   }
 }
@@ -182,8 +203,7 @@ function drawTVChart(){
   const entries = Object.entries(store.data.tv||{});
   const filtered = filter ? entries.filter(([k])=>k===filter) : entries;
   filtered.forEach(([coach, series])=>{
-    labels = series.months; // assume same months
-    datasets.push({ label: coach, data: series.values, tension: 0.35, fill:false });
+    labels = series.months; datasets.push({ label: coach, data: series.values, tension: 0.35, fill:false });
   });
   if(tvChart) tvChart.destroy();
   tvChart = new Chart(ctx, { type:'line', data:{ labels, datasets }, options:{ responsive:true, plugins:{ legend:{ position:'bottom' } } } });
@@ -208,6 +228,24 @@ function renderPeople(){
   const modal = $('#personModal');
   const form = modal?.querySelector('form');
 
+  function ensureFieldLabels(){
+    if (!form) return;
+    const addLabel = (el, text) => {
+      if (!el) return;
+      if (!el.previousElementSibling || el.previousElementSibling.tagName.toLowerCase() !== 'span') {
+        const s = document.createElement('span'); s.className = 'text-sm text-gray-600'; s.textContent = text; el.parentElement?.insertBefore(s, el);
+      }
+    };
+    addLabel(form.querySelector('input[name="first_name"]'), 'First name');
+    addLabel(form.querySelector('input[name="last_name"]'), 'Surname');
+    addLabel(form.querySelector('select[name="status"]'), 'Status');
+    addLabel(form.querySelector('select[name="location"]'), 'Location');
+    addLabel(form.querySelector('select[name="member_type"]'), 'Member type');
+    addLabel(form.querySelector('select[name="upline_id"]'), 'Upline');
+    addLabel(form.querySelector('select[name="coach_id"]'), 'Coach');
+    addLabel(form.querySelector('input[name="hl_id"]'), 'HL ID (optional)');
+  }
+
   function populateRefs(){
     if (!form) return;
     const opts = ['<option value="">(none)</option>', ...store.data.people.map(p=>`<option value="${p.id}">${personName(p)}</option>`)];
@@ -230,6 +268,7 @@ function renderPeople(){
   }
 
   function render(){
+    ensureFieldLabels();
     populateRefs();
     tbody.innerHTML = rows().map(p=>{
       const upline = store.data.people.find(x=>x.id===p.upline_id);
@@ -248,7 +287,6 @@ function renderPeople(){
         </td>
       </tr>`;
     }).join('');
-    // bind row actions
     $$('[data-edit]').forEach(b=>b.onclick = ()=>openEdit(b.dataset.edit));
     $$('[data-del]').forEach(b=>b.onclick = ()=>del(b.dataset.del));
   }
@@ -272,9 +310,8 @@ function renderPeople(){
   function del(id){
     if(!confirm('Delete this person?')) return;
     store.data.people = store.data.people.filter(p=>p.id!==id);
-    // clean references
     store.data.people.forEach(p=>{ if(p.upline_id===id) p.upline_id=null; if(p.coach_id===id) p.coach_id=null; });
-    store.save(); render(); renderDashboard();
+    store.save(); render(); renderDashboard(); toast('Deleted person');
   }
 
   if (addBtn) addBtn.onclick = ()=>openEdit(null);
@@ -299,7 +336,7 @@ function renderPeople(){
         member_type: form.member_type.value,
         hl_id: form.hl_id.value.trim()||null
       };
-      if (exists) { Object.assign(exists, rec); } else { store.data.people.push(rec); }
+      if (exists) { Object.assign(exists, rec); toast(`Updated ${personName(rec)}`); } else { store.data.people.push(rec); toast(`Added ${personName(rec)}`); }
       store.save(); modal.close(); render(); renderDashboard();
     };
   }
@@ -318,7 +355,7 @@ function renderTasks(){
     e.preventDefault();
     const fd = new FormData(form);
     const t = { id: crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2), title: fd.get('title'), due: fd.get('due'), done:false, person_id: fd.get('person_id')||null };
-    store.data.tasks.push(t); store.save(); form.reset(); draw();
+    store.data.tasks.push(t); store.save(); form.reset(); draw(); toast('Task added');
   };
 
   function draw(){
@@ -339,8 +376,8 @@ function renderTasks(){
     const done = store.data.tasks.filter(t=>t.done);
     openList.innerHTML = open.map(item).join('');
     doneList.innerHTML = done.map(item).join('');
-    $$('[data-done]').forEach(b=>b.onclick = ()=>{ const t=store.data.tasks.find(x=>x.id===b.dataset.done); t.done=true; store.save(); draw(); });
-    $$('[data-del]').forEach(b=>b.onclick = ()=>{ store.data.tasks = store.data.tasks.filter(x=>x.id!==b.dataset.del); store.save(); draw(); });
+    $$('[data-done]').forEach(b=>b.onclick = ()=>{ const t=store.data.tasks.find(x=>x.id===b.dataset.done); t.done=true; store.save(); draw(); toast('Task completed'); });
+    $$('[data-del]').forEach(b=>b.onclick = ()=>{ store.data.tasks = store.data.tasks.filter(x=>x.id!==b.dataset.del); store.save(); draw(); toast('Task deleted'); });
   }
   draw();
 }
@@ -362,7 +399,7 @@ function renderSocials(){
       permissions: fd.get('permissions'),
       scheduled_at: fd.get('scheduled_at')
     };
-    store.data.socials.push(rec); store.save(); form.reset(); draw();
+    store.data.socials.push(rec); store.save(); form.reset(); draw(); toast('Social entry added');
   }
   function draw(){
     tbody.innerHTML = store.data.socials.map(s=>{
@@ -392,7 +429,7 @@ function renderCampaigns(){
       id: crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
       name: fd.get('name'), ctype: fd.get('ctype'), start_date: fd.get('start_date'), end_date: fd.get('end_date'), location: fd.get('location')
     };
-    store.data.campaigns.push(rec); store.save(); form.reset(); draw();
+    store.data.campaigns.push(rec); store.save(); form.reset(); draw(); toast('Campaign added');
   }
   function draw(){
     tbody.innerHTML = store.data.campaigns.map(c=>`<tr>
@@ -404,6 +441,125 @@ function renderCampaigns(){
     </tr>`).join('');
   }
   draw();
+}
+
+// --- Voice & Command Bar ---
+function addCommandUI(){
+  const btn = document.createElement('button');
+  btn.id = 'micBtn'; btn.title = 'Voice command';
+  Object.assign(btn.style, {position:'fixed', right:'16px', bottom:'16px', padding:'10px 12px', borderRadius:'9999px', background:'#111', color:'#fff', boxShadow:'0 6px 20px rgba(0,0,0,0.2)'});
+  btn.textContent = '🎤';
+
+  const bar = document.createElement('div');
+  bar.id = 'cmdBar';
+  Object.assign(bar.style, {position:'fixed', left:'50%', bottom:'16px', transform:'translateX(-50%)', background:'#fff', border:'1px solid #ddd', borderRadius:'12px', padding:'8px', boxShadow:'0 8px 30px rgba(0,0,0,0.15)', display:'none'});
+  bar.innerHTML = `<input id="cmdInput" placeholder="Try: update Paula to member" style="width:320px;padding:8px;border:1px solid #ddd;border-radius:8px;margin-right:8px" />
+  <button id="cmdRun" class="btn btn-primary">Run</button>`;
+
+  document.body.appendChild(btn); document.body.appendChild(bar);
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null;
+  if (SR) {
+    rec = new SR(); rec.lang='en-GB'; rec.continuous=false; rec.interimResults=false;
+    rec.onresult = (e)=>{ const text = e.results[0][0].transcript; handleCommand(text); };
+    rec.onstart = ()=>{ btn.textContent='🎙️'; toast('Listening…'); };
+    rec.onend = ()=>{ btn.textContent='🎤'; };
+  }
+
+  btn.onclick = ()=>{
+    if (rec) {
+      try { rec.start(); } catch {}
+    } else {
+      bar.style.display = bar.style.display==='none' ? 'block' : 'none';
+      $('#cmdInput')?.focus();
+    }
+  };
+  $('#cmdRun')?.addEventListener('click', ()=>{ const v = $('#cmdInput').value.trim(); if(v){ handleCommand(v); $('#cmdInput').value=''; } });
+}
+
+function normaliseStatus(s){
+  const t = s.toLowerCase().trim();
+  const map = {
+    'potential':'Potential',
+    'conversation':'Conversation',
+    'wellness evaluation':'Wellness Evaluation','wellness':'Wellness Evaluation','evaluation':'Wellness Evaluation',
+    'member':'Member',
+    'ex member':'Ex-Member','ex-member':'Ex-Member','exmember':'Ex-Member',
+    'archived':'Archived',
+    'dead':'Dead Member','dead member':'Dead Member'
+  };
+  return map[t] || (t.charAt(0).toUpperCase()+t.slice(1));
+}
+
+function findPersonByName(name){
+  const n = name.toLowerCase().trim();
+  const exact = store.data.people.find(p => (p.first_name+' '+p.last_name).toLowerCase() === n);
+  if (exact) return exact;
+  const parts = n.split(/\s+/);
+  if (parts.length===1) {
+    const first = store.data.people.filter(p=>p.first_name.toLowerCase()===parts[0]);
+    if (first.length===1) return first[0];
+  }
+  return store.data.people.find(p => (p.first_name+' '+p.last_name).toLowerCase().includes(n) || p.first_name.toLowerCase()===n || p.last_name.toLowerCase()===n);
+}
+
+function handleCommand(raw){
+  const text = raw.trim(); if(!text) return;
+  const low = text.toLowerCase();
+
+  // update X to STATUS
+  let m = low.match(/^(?:update|set)\s+(.+?)\s+to\s+(.+)$/);
+  if (m) {
+    const person = findPersonByName(m[1]);
+    if (!person) { toast(`Couldn’t find ${m[1]}`); return; }
+    const status = normaliseStatus(m[2]);
+    person.status = status; store.save(); renderAll(); toast(`Updated ${personName(person)} → ${status}`); return;
+  }
+
+  // add person FIRST LAST [status X]
+  m = low.match(/^add\s+person\s+([a-z\-']+)\s+([a-z\-']+)(?:\s+status\s+(.+))?$/);
+  if (m) {
+    const fn = m[1]; const ln = m[2]; const st = m[3] ? normaliseStatus(m[3]) : 'Potential';
+    const rec = { id: crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2), code: nextCode(store.data.people), first_name: cap(fn), last_name: cap(ln), status: st, is_coach:false, upline_id:null, coach_id:null, location:'Unknown', member_type:'Unknown' };
+    store.data.people.push(rec); store.save(); renderAll(); toast(`Added ${personName(rec)} (${st})`); return;
+  }
+
+  // set coach of NAME to COACHNAME
+  m = low.match(/^set\s+coach\s+of\s+(.+?)\s+to\s+(.+)$/);
+  if (m) {
+    const person = findPersonByName(m[1]); const coach = findPersonByName(m[2]);
+    if (!person || !coach) { toast('Couldn’t resolve person or coach'); return; }
+    person.coach_id = coach.id; store.save(); renderAll(); toast(`Coach for ${personName(person)} → ${personName(coach)}`); return;
+  }
+
+  // set upline of NAME to UPLINENAME
+  m = low.match(/^set\s+upline\s+of\s+(.+?)\s+to\s+(.+)$/);
+  if (m) {
+    const person = findPersonByName(m[1]); const upline = findPersonByName(m[2]);
+    if (!person || !upline) { toast('Couldn’t resolve person or upline'); return; }
+    person.upline_id = upline.id; store.save(); renderAll(); toast(`Upline for ${personName(person)} → ${personName(upline)}`); return;
+  }
+
+  toast('Try: “update Paula to member”, “add person John Smith status member”');
+}
+
+function cap(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+
+function toast(msg){
+  let host = $('#toastHost');
+  if(!host){ host = document.createElement('div'); host.id='toastHost'; host.style.position='fixed'; host.style.left='50%'; host.style.bottom='24px'; host.style.transform='translateX(-50%)'; host.style.zIndex=9999; document.body.appendChild(host); }
+  const t = document.createElement('div'); t.textContent = msg; t.style.background='#111'; t.style.color='#fff'; t.style.padding='8px 12px'; t.style.borderRadius='10px'; t.style.marginTop='6px'; t.style.boxShadow='0 8px 24px rgba(0,0,0,0.25)'; host.appendChild(t); setTimeout(()=>{ t.remove(); }, 2200);
+}
+
+// --- Dialog polyfill for Safari <16 ---
+function polyfillDialog(){
+  const dlg = document.createElement('dialog');
+  if (typeof dlg.showModal === 'function') return; // supported
+  document.querySelectorAll('dialog').forEach(d => {
+    d.showModal = function(){ this.setAttribute('open',''); this.style.display='block'; this.style.position='fixed'; this.style.left='50%'; this.style.top='10%'; this.style.transform='translateX(-50%)'; this.style.zIndex=9998; document.body.style.overflow='hidden'; };
+    d.close = function(){ this.removeAttribute('open'); this.style.display='none'; document.body.style.overflow='auto'; };
+  });
 }
 
 // Boot
