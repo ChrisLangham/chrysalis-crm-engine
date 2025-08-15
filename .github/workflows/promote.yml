@@ -1,0 +1,36 @@
+name: Promote to prod
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or commit to promote"
+        required: false
+        default: "main"
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ref to promote
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Move 'prod' tag to this commit
+        run: |
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+          git tag -d prod || true
+          git push origin :refs/tags/prod || true
+          git tag prod
+          git push origin prod
+
+      - name: Create/Update 'prod' release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: prod
+          name: Production release
+          generate_release_notes: true
