@@ -11,7 +11,7 @@ function nextCode(people){
   const max = nums.length ? Math.max(...nums) : 100000;
   return 'C' + String(max+1).padStart(6,'0');
 }
-
+ 
 // --- Mode & Simple local store ---
 const params = new URLSearchParams(location.search);
 const DEMO = params.has('demo') || params.get('mode') === 'demo';
